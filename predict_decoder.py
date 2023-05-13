@@ -3,7 +3,7 @@
 # This file is released under specific terms. See LICENSE.txt or go to https://opensource.org/license/mit/
 import models
 import data_processing
-from typing import List, Union
+from typing import List, Union, Optional
 from itertools import takewhile
 import tqdm
 import logging
@@ -52,7 +52,7 @@ def convert_tensor_to_seq(generated: torch.Tensor, reverse_mapper: dict, quark: 
                     valid = True
                     break
         except KeyError:
-            continue
+            valid = False
 
         results.append((res, valid))
 
@@ -96,8 +96,9 @@ def load_quark_model(pth: str):
     quark_model.load_state_dict(weights)
     quantile_offset = training_args.quantile_offset
     n_quantiles = len(training_args.quantiles)
-    quark_predictor = QuarkPredictor(quark_model, n_quantiles + quantile_offset - 1)
-    return quark_predictor
+    hiq = n_quantiles + quantile_offset - 1
+    quark_predictor = QuarkPredictor(quark_model, hiq)
+    return quark_predictor, hiq
 
 
 def is_cuda(model: torch.nn.Module):
@@ -108,11 +109,31 @@ def get_device(model: torch.nn.Module):
     return next(model.parameters()).get_device()
 
 
+def get_generated_data(filename: str, quark_quantile: Optional[int] = None):
+    with open(filename, "r") as fhandle:
+        sequences = [json.loads(l)["seq"] for l in fhandle]
+
+    mapper = _MAPPER
+    prefix = [mapper["[CLS]"]]
+
+    if quark_quantile:
+        prefix = prefix + [quark_quantile]
+
+    sequences_ = []
+
+    for seq in sequences:
+        seq = torch.LongTensor([prefix + [mapper[i] for i in seq]])
+        sequences_.append(seq)
+
+    return sequences_
+
+
 def main(args):
     if args.quark_model:
-        model = load_quark_model(args.checkpoint)
+        model, quark_quantile = load_quark_model(args.checkpoint)
     else:
         model = models.from_pretrained(args.checkpoint, "Decoder")
+        quark_quantile = None
 
     model.eval()
 
@@ -130,9 +151,12 @@ def main(args):
     all_results = []
     all_generations = []
 
-    for i in tqdm.tqdm(range(args.num_batches), desc="Generating sequences"):
-        res = model.generate(bos_token_id=_BOS_TOKEN, eos_token_id=_EOS_TOKEN, **gen_kwargs)
-        all_generations.append(res.cpu())
+    if args.pregen:
+        all_generations = get_generated_data(args.pregen, quark_quantile=quark_quantile)
+    else:
+        for i in tqdm.tqdm(range(args.num_batches), desc="Generating sequences"):
+            res = model.generate(bos_token_id=_BOS_TOKEN, eos_token_id=_EOS_TOKEN, **gen_kwargs)
+            all_generations.append(res.cpu())
 
     max_length = max(x.shape[1] for x in all_generations)
     all_generations = [
@@ -140,11 +164,12 @@ def main(args):
     all_generations = torch.cat(all_generations, dim=0)
 
     all_likelihoods = []
+    ll_batch_size = gen_kwargs["num_return_sequences"] if args.ll_batch_size is None else args.ll_batch_size
 
     for res in tqdm.tqdm(
         torch.split(
             all_generations,
-            split_size_or_sections=gen_kwargs["num_return_sequences"],
+            split_size_or_sections=ll_batch_size,
             dim=0
         ),
         desc="Calculating likelihoods",
@@ -194,6 +219,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_batches", help="Number of batches of generations to run", type=int, required=True)
     parser.add_argument("--quark_model", help="Indicate that we want quark model generation", action="store_true", default=False)
     parser.add_argument("--seed", help="Seed for generation", default=None, type=int)
+    parser.add_argument("--pregen", help="Pre-generated file if only scoring is desired", required=False)
+    parser.add_argument("--ll_batch_size", help="Batch size for LL calculation", default=None, type=int)
 
     add_sampler_parameters(parser)
 
