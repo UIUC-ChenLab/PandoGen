@@ -209,3 +209,18 @@ python train_quark_finetune.py \
         --no_dropout \
         --early_stopping <Number of early stopping steps>
 ```
+
+# 3 Running PandoGen sequence generation
+
+```
+ python predict_decoder.py \
+                        --checkpoint <Final PandoGen model> \
+                        --output_prefix <Prefix of output json file> \
+                        --quark_model \
+                        --gen_do_sample \
+                        --gen_max_new_tokens 1398 \
+                        --gen_num_return_sequences <Batch size> \
+                        --gen_top_p <Top-p value> \
+                        --num_batches <Number of batches to generate> \
+                        --seed <Random seed>
+```
