@@ -23,7 +23,7 @@ bioconda
 biopython
 ```
 
-# Running scripts
+# Running PandoGen training
 
 1. Generating fasta data from the variant\_surveillance.tsv file for finetuning SDA
 
