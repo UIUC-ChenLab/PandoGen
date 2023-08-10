@@ -151,6 +151,16 @@ class ModelArguments:
         metadata={"help": "Number of early stopping iterations if desired"}
     )
 
+    batched_membership_test: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Perform quark membership test in batches"}
+    )
+
+    membership_batch_size: Optional[int] = field(
+        default=100000,
+        metadata={"help": "Batch size of historical sequences for membership test"}
+    )
+
 
 def set_dropout_0(model: torch.nn.Module):
     """
@@ -201,7 +211,12 @@ def make_model(
     eos_token = mapper[special_tokens.end_of_sequence]
 
     reward_model = quark_finetune.RewardModel(
-        scorer=scorer, eos_token=eos_token, prev_sequences=prior_sequences)
+        scorer=scorer,
+        eos_token=eos_token,
+        prev_sequences=prior_sequences,
+        batch_membership_test=args.batched_membership_test,
+        membership_batch_size=args.membership_batch_size,
+    )
 
     quark_model = quark_finetune.QuarkModel(
         train_model=decoder,

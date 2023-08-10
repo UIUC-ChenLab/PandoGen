@@ -33,6 +33,7 @@ class ScoredData:
     min_seq_date: Optional[datetime.datetime] = None
     novel_kmers: Optional[int] = None
     kmer_length: Optional[int] = None
+    lineage: Optional[str] = None
 
     def __post_init__(self):
         if self.invalid_seq:
@@ -114,8 +115,18 @@ def read_data(
     # and create_occurrence_buckets, which is okay
     # df = df[df[f"reconstruction_success_{protein}"]]
 
-    old_mutations = df[df.ParsedDate <= parse_date(last_date)].SpikeMutations.tolist()
-    new_mutations = df[df.ParsedDate > parse_date(last_date)].SpikeMutations.tolist()
+    old_df = df[df.ParsedDate <= parse_date(last_date)]
+    new_df = df[df.ParsedDate > parse_date(last_date)]
+
+    pango_dict = {
+        get_full_sequence(s, ref): p for s, p in zip(
+            new_df.SpikeMutations.tolist(), 
+            new_df.PangoLineage.tolist(),
+        )
+    }
+
+    old_mutations = old_df.SpikeMutations.tolist()
+    new_mutations = new_df.SpikeMutations.tolist()
 
     old_sequences = [get_full_sequence(i, ref) for i in old_mutations]
     old_sequences_with_counts = {}
@@ -129,7 +140,9 @@ def read_data(
     for m, s in zip(new_mutations, new_sequences):
         new_sequences_with_counts[s] = count_dict[m]
 
-    return old_sequences_with_counts, new_sequences_with_counts
+    mutation_map = {get_full_sequence(j, ref): j for j in new_mutations}
+
+    return old_sequences_with_counts, new_sequences_with_counts, pango_dict, mutation_map
 
 
 def is_invalid(seq: str):
@@ -146,7 +159,7 @@ def is_invalid(seq: str):
         return True
 
 
-def process_file(prediction_file: str, old_seq: dict, new_seq: dict, kmer_length: int = 11):
+def process_file(prediction_file: str, old_seq: dict, new_seq: dict, kmer_length: int = 11, pango_dict: Optional[dict] = None, mut_map: Optional[dict] = None):
     old_seq_checker = SeqChecker(old_seq)
     new_seq_checker = SeqChecker(new_seq)
     ref_kmers = binary_search_parameter.get_kmers(old_seq, length=kmer_length)
@@ -170,6 +183,16 @@ def process_file(prediction_file: str, old_seq: dict, new_seq: dict, kmer_length
                 novel_kmers = binary_search_parameter.get_per_sequence_novelty(
                     seq, ref_kmers=ref_kmers, known_valid=True)
 
+            if pango_dict:
+                lineage = pango_dict.get(seq, None)
+            else:
+                lineage = None
+
+            if mut_map:
+                muts = mut_map.get(seq, None)
+            else:
+                muts = None
+
             result_tuples.append(
                 ScoredData(
                     new_seq=new_flag,
@@ -181,6 +204,8 @@ def process_file(prediction_file: str, old_seq: dict, new_seq: dict, kmer_length
                     count=new_seq.get(seq, 0),
                     novel_kmers=novel_kmers,
                     kmer_length=kmer_length,
+                    lineage=lineage,
+                    mutation_repr=muts,
                 )
             )
 
@@ -194,12 +219,14 @@ def main(args):
         ref = fhandle.read().strip()
 
     logging.info("Reading data")
-    old_seq, new_seq = read_data(args.tsv, args.last_date, ref, args.datefield, args.protein)
+    old_seq, new_seq, pango_dict, mut_map = read_data(args.tsv, args.last_date, ref, args.datefield, args.protein)
     process_file_functor = partial(
         process_file,
         old_seq=old_seq,
         new_seq=new_seq,
         kmer_length=args.kmer_length,
+        pango_dict=pango_dict,
+        mut_map=mut_map,
     )
 
     logging.info("Preparing plot data")

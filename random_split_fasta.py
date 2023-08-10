@@ -141,13 +141,16 @@ def main(args):
 
     write_full_seq(train_sequences, ref, args.prefix + ".train.fa")
     write_mutation_seq(train_sequences, args.prefix + ".train.mutations.lst")
+    write_mutation_seq(train_lineages, args.prefix + ".train.lineages.lst")
 
     write_full_seq(val_sequences, ref, args.prefix + ".val.fa")
     write_mutation_seq(val_sequences, args.prefix + ".val.mutations.lst")
+    write_mutation_seq(val_lineages, args.prefix + ".val.lineages.lst")
 
     if test_sequences:
         write_full_seq(test_sequences, ref, args.prefix + ".test.fa")
         write_mutation_seq(test_sequences, args.prefix + ".test.mutations.lst")
+        write_mutation_seq(test_lineages, args.prefix + ".test.lineages.lst")
 
 
 if __name__ == "__main__":

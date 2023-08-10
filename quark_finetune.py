@@ -83,10 +83,14 @@ class RewardModel(torch.nn.Module):
         scorer: torch.nn.Module,
         eos_token: int,
         prev_sequences: torch.ByteTensor,
+        batch_membership_test: bool = False,
+        membership_batch_size: int = 100000
     ):
         super().__init__()
         self.scorer = scorer
         self.eos_token = eos_token
+        self.batch_membership_test = batch_membership_test
+        self.membership_batch_size = membership_batch_size
         self.register_buffer("prev_sequences", prev_sequences)
 
     def _get_existing_flag_decoder(
@@ -96,7 +100,11 @@ class RewardModel(torch.nn.Module):
         # For membership, we ignore the bos token, then pad equally
         sequences = sequences[:, 1:]
         prev_sequences, sequences = pad_equally(self.prev_sequences, sequences)
-        membership = membership_test(prev_sequences.byte(), sequences.byte())
+        if self.batch_membership_test:
+            membership = membership_test_batched(
+                prev_sequences.byte(), sequences.byte(), batch_size=self.membership_batch_size)
+        else:
+            membership = membership_test(prev_sequences.byte(), sequences.byte())
         return membership
 
     def forward(self, input_ids: torch.LongTensor, attention_mask: torch.ByteTensor) -> torch.LongTensor:
