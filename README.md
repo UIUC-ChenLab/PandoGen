@@ -205,7 +205,7 @@ python train_quark_finetune.py \
         --logging_steps $LOGGING_STEPS \
         --save_strategy epoch \
         --fp16 \
-        --dataloader_num_workers 4 \
+        --dataloader_num_workers <Number of data workers> \
         --no_dropout \
         --early_stopping <Number of early stopping steps>
 ```
