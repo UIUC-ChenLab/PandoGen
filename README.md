@@ -25,7 +25,7 @@ biopython
 
 # Running PandoGen training
 
-1. Downloadign a pretrained checkpoint
+1. Downloading a pretrained checkpoint
 
 A pre-trained checkpoint on UniRef50 sequences is available at https://huggingface.co/oddjobs/pandogen-uda
 
@@ -61,7 +61,7 @@ the appropriate values: `gpu1_config.slurm`, `gpu4_config.slurm`, `cpu_config.sl
 will automatically pick those.
 
 The training results will be in the directory `models` inside the working directory. The quark checkpoint will be
-in `models/quark_JOBNAME_${Timestamp}` where JOBNAME is the option passed through `--name_prefix` and $Timestamp
+in `models/quark_JOBNAME_Timestamp` where JOBNAME is the option passed through `--name_prefix` and `Timestamp`
 is the time at which the job was launched.
 
 3. Package PandoGen checkpoints
