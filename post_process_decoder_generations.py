@@ -9,12 +9,13 @@ import pickle
 import argparse
 import logging
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Optional, Union, Dict
 from collections import defaultdict
 from functools import partial
 from multiprocessing import Pool
 import tqdm
 import binary_search_parameter
+from collections import defaultdict
 
 
 @dataclass
@@ -34,31 +35,42 @@ class ScoredData:
     novel_kmers: Optional[int] = None
     kmer_length: Optional[int] = None
     lineage: Optional[str] = None
+    new_pango_flag: Optional[bool] = None
 
     def __post_init__(self):
         if self.invalid_seq:
             self.new_seq = False
             self.old_seq = False
             self.false_seq = False
+            self.new_pango_flag = False
 
 
 class SeqChecker:
-    def __init__(self, seq_set: Union[set, dict]):
+    def __init__(
+        self,
+        seq_set: Union[set, dict],
+        **checker_dicts,
+    ):
         self.seq_set = seq_set
         self.seq_set_by_length = defaultdict(set)
         for seq in seq_set:
             self.seq_set_by_length[len(seq)].add(seq)
         self.cached_results = dict()
+        self.checker_dicts = checker_dicts
 
     def __call__(self, seq_to_compare: str):
         seq_length = len(seq_to_compare)
+        other_return_values = None
 
         if seq_to_compare in self.cached_results:
             return self.cached_results[seq_to_compare]
 
         elif seq_to_compare in self.seq_set:
             result = True
-
+            other_return_values = {
+                key: self.checker_dicts[key].get(seq_to_compare, None)
+                for key in self.checker_dicts
+            }
         elif seq_length not in self.seq_set_by_length:
             result = False
 
@@ -79,13 +91,17 @@ class SeqChecker:
                     break
                 else:
                     result = True
+                    other_return_values = {
+                        key: self.checker_dicts[key].get(c, None)
+                        for key in self.checker_dicts
+                    }
                     break
             else:
                 result = False
 
-        self.cached_results[seq_to_compare] = result
+        self.cached_results[seq_to_compare] = (result, other_return_values)
 
-        return result
+        return result, other_return_values
 
 
 def parse_date(x: str) -> datetime.datetime:
@@ -117,13 +133,20 @@ def read_data(
 
     old_df = df[df.ParsedDate <= parse_date(last_date)]
     new_df = df[df.ParsedDate > parse_date(last_date)]
-
-    pango_dict = {
-        get_full_sequence(s, ref): p for s, p in zip(
-            new_df.SpikeMutations.tolist(), 
-            new_df.PangoLineage.tolist(),
-        )
+    new_df_date_dict = {
+        get_full_sequence(s, ref): d for s, d in zip(
+            new_df.SpikeMutations.tolist(), new_df.ParsedDate.tolist())
     }
+
+    df_pango = df.loc[df.groupby("PangoLineage").ParsedDate.idxmin()]
+
+    pango_dict = defaultdict(list)
+
+    for s, p in zip(new_df.SpikeMutations.tolist(), new_df.PangoLineage.tolist()):
+        full_seq = get_full_sequence(s, ref)
+        pango_dict[full_seq].append(p)
+
+    new_pangos = set(df_pango[df_pango.ParsedDate > parse_date(last_date)].PangoLineage.tolist())
 
     old_mutations = old_df.SpikeMutations.tolist()
     new_mutations = new_df.SpikeMutations.tolist()
@@ -142,7 +165,14 @@ def read_data(
 
     mutation_map = {get_full_sequence(j, ref): j for j in new_mutations}
 
-    return old_sequences_with_counts, new_sequences_with_counts, pango_dict, mutation_map
+    return (
+        old_sequences_with_counts,
+        new_sequences_with_counts,
+        pango_dict,
+        mutation_map,
+        new_pangos,
+        new_df_date_dict,
+    )
 
 
 def is_invalid(seq: str):
@@ -159,9 +189,23 @@ def is_invalid(seq: str):
         return True
 
 
-def process_file(prediction_file: str, old_seq: dict, new_seq: dict, kmer_length: int = 11, pango_dict: Optional[dict] = None, mut_map: Optional[dict] = None):
+def process_file(
+    prediction_file: str,
+    old_seq: dict,
+    new_seq: dict,
+    kmer_length: int = 11,
+    pango_dict: Optional[dict] = None,
+    mut_map: Optional[dict] = None,
+    new_pangos: Optional[set] = None,
+    new_df_date_dict: Optional[set] = None,
+):
     old_seq_checker = SeqChecker(old_seq)
-    new_seq_checker = SeqChecker(new_seq)
+    new_seq_checker = SeqChecker(
+        new_seq,
+        mutation_map=mut_map,
+        lineage_dict=pango_dict,
+        seq_dates_dict=new_df_date_dict
+    )
     ref_kmers = binary_search_parameter.get_kmers(old_seq, length=kmer_length)
     result_tuples = []
 
@@ -173,25 +217,24 @@ def process_file(prediction_file: str, old_seq: dict, new_seq: dict, kmer_length
             new_flag = False
             old_flag = False
             novel_kmers = None
+            lineage = None
+            seq_date = None
+            muts = None
 
             invalid_flag = is_invalid(seq)
 
             if not invalid_flag:
-                old_flag = old_seq_checker(seq)
+                old_flag, _ = old_seq_checker(seq)
                 if not old_flag:
-                    new_flag = new_seq_checker(seq)
+                    new_flag, other_returns = new_seq_checker(seq)
+                    if other_returns:
+                        lineage = other_returns["lineage_dict"]
+                        seq_date = other_returns["seq_dates_dict"]
+                        muts = other_returns["mutation_map"]
                 novel_kmers = binary_search_parameter.get_per_sequence_novelty(
                     seq, ref_kmers=ref_kmers, known_valid=True)
 
-            if pango_dict:
-                lineage = pango_dict.get(seq, None)
-            else:
-                lineage = None
-
-            if mut_map:
-                muts = mut_map.get(seq, None)
-            else:
-                muts = None
+            new_pango_flag = (lineage is not None) and all(p in new_pangos for p in lineage)
 
             result_tuples.append(
                 ScoredData(
@@ -201,11 +244,13 @@ def process_file(prediction_file: str, old_seq: dict, new_seq: dict, kmer_length
                     invalid_seq=invalid_flag,
                     score=score,
                     seq=seq,
+                    seq_date=seq_date,
                     count=new_seq.get(seq, 0),
                     novel_kmers=novel_kmers,
                     kmer_length=kmer_length,
                     lineage=lineage,
                     mutation_repr=muts,
+                    new_pango_flag=new_pango_flag,
                 )
             )
 
@@ -219,7 +264,14 @@ def main(args):
         ref = fhandle.read().strip()
 
     logging.info("Reading data")
-    old_seq, new_seq, pango_dict, mut_map = read_data(args.tsv, args.last_date, ref, args.datefield, args.protein)
+    (
+        old_seq,
+        new_seq,
+        pango_dict,
+        mut_map,
+        new_pangos,
+        new_df_date_dict,
+    ) = read_data(args.tsv, args.last_date, ref, args.datefield, args.protein)
     process_file_functor = partial(
         process_file,
         old_seq=old_seq,
@@ -227,6 +279,8 @@ def main(args):
         kmer_length=args.kmer_length,
         pango_dict=pango_dict,
         mut_map=mut_map,
+        new_pangos=new_pangos,
+        new_df_date_dict=new_df_date_dict,
     )
 
     logging.info("Preparing plot data")

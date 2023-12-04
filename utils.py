@@ -5,9 +5,20 @@ from dataclasses import dataclass
 from functools import reduce
 from operator import concat
 from typing import Optional, Generator, List
-import torch
 import re
 from collections import namedtuple
+import logging
+
+logger = logging.getLogger(__file__)
+
+try:
+    import torch
+except ModuleNotFoundError:
+    logger.warning("Cannot import torch. Applications needing torch will fail.")
+    class torch:
+        class nn:
+            class Module:
+                pass
 
 
 _AMBIGUOUS_CHARACTERS = "BXJZ"
@@ -133,7 +144,7 @@ def get_full_sequence(mutations: str, reference: str) -> str:
     return "".join(["".join(x) for x in sequence])
 
 
-def fasta_serial_reader(fasta_file: str) -> Generator[FastaItem, None, None]:
+def fasta_serial_reader(fasta_file: str, sep: Optional[str] = None) -> Generator[FastaItem, None, None]:
     """
     Read a Fasta File serially
     """
@@ -148,7 +159,7 @@ def fasta_serial_reader(fasta_file: str) -> Generator[FastaItem, None, None]:
                     yield FastaItem(header, "".join(collected))
                     collected.clear()
                     header = None
-                header = line[1:].split()[0]
+                header = line[1:].split(sep)[0]
             elif header and len(line) > 0:
                 collected.append(line)
 

@@ -60,9 +60,9 @@ def convert_tensor_to_seq(generated: torch.Tensor, reverse_mapper: dict, quark: 
 
 
 class QuarkPredictor(torch.nn.Module):
-    def __init__(self, quark_model: QuarkModel, quantile_token: int):
+    def __init__(self, quark_train_model: BertLMHeadModel, quantile_token: int):
         super().__init__()
-        self.train_model = quark_model.train_model
+        self.train_model = quark_train_model
         self.quantile_token = quantile_token
 
     @property
@@ -87,17 +87,23 @@ class QuarkPredictor(torch.nn.Module):
         return self.train_model(*args, **kwargs)
 
 
-def load_quark_model(pth: str):
+def load_quark_model(pth: str, load_from_pretrained: bool = False):
     filename = os.path.join(pth, TRAINING_ARGS_NAME)
     training_args = torch.load(filename)
-    model_args = training_args.model_args
-    quark_model = make_model(model_args)
-    weights = torch.load(os.path.join(pth, WEIGHTS_NAME), map_location="cpu")
-    quark_model.load_state_dict(weights)
+
+    if load_from_pretrained:
+        quark_train_model = models.from_pretrained(pth, model_type="Decoder")
+    else:
+        model_args = training_args.model_args
+        quark_model = make_model(model_args)
+        weights = torch.load(os.path.join(pth, WEIGHTS_NAME), map_location="cpu")
+        quark_model.load_state_dict(weights)
+        quark_train_model = quark_model.train_model
+
     quantile_offset = training_args.quantile_offset
     n_quantiles = len(training_args.quantiles)
     hiq = n_quantiles + quantile_offset - 1
-    quark_predictor = QuarkPredictor(quark_model, hiq)
+    quark_predictor = QuarkPredictor(quark_train_model, hiq)
     return quark_predictor, hiq
 
 
@@ -130,7 +136,7 @@ def get_generated_data(filename: str, quark_quantile: Optional[int] = None):
 
 def main(args):
     if args.quark_model:
-        model, quark_quantile = load_quark_model(args.checkpoint)
+        model, quark_quantile = load_quark_model(args.checkpoint, args.load_from_pretrained)
     else:
         model = models.from_pretrained(args.checkpoint, "Decoder")
         quark_quantile = None
@@ -221,6 +227,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", help="Seed for generation", default=None, type=int)
     parser.add_argument("--pregen", help="Pre-generated file if only scoring is desired", required=False)
     parser.add_argument("--ll_batch_size", help="Batch size for LL calculation", default=None, type=int)
+    parser.add_argument("--load_from_pretrained", help="Load model from pretrained (if model has been saved using package_quark_model.py)", default=False, action="store_true")
 
     add_sampler_parameters(parser)
 

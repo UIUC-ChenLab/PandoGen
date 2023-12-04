@@ -91,20 +91,20 @@ class RewardModel(torch.nn.Module):
         self.eos_token = eos_token
         self.batch_membership_test = batch_membership_test
         self.membership_batch_size = membership_batch_size
-        self.register_buffer("prev_sequences", prev_sequences)
+        self.register_buffer("prev_sequences", prev_sequences.byte())
 
     def _get_existing_flag_decoder(
         self,
         sequences: torch.LongTensor,
     ) -> torch.BoolTensor:
         # For membership, we ignore the bos token, then pad equally
-        sequences = sequences[:, 1:]
+        sequences = sequences[:, 1:].byte()
         prev_sequences, sequences = pad_equally(self.prev_sequences, sequences)
         if self.batch_membership_test:
             membership = membership_test_batched(
-                prev_sequences.byte(), sequences.byte(), batch_size=self.membership_batch_size)
+                prev_sequences, sequences, batch_size=self.membership_batch_size)
         else:
-            membership = membership_test(prev_sequences.byte(), sequences.byte())
+            membership = membership_test(prev_sequences, sequences)
         return membership
 
     def forward(self, input_ids: torch.LongTensor, attention_mask: torch.ByteTensor) -> torch.LongTensor:
@@ -269,6 +269,12 @@ class QuarkModel(torch.nn.Module):
         self.bos_token_ref = bos_token_ref
         self.ref_model.eval()
         self.reward_model.eval()
+
+    def gradient_checkpointing_enable(self):
+        """
+        Enable gradient checkpointing in underlying trainable model
+        """
+        self.train_model.gradient_checkpointing_enable()
 
     def eval(self) -> torch.nn.Module:
         """

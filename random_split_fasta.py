@@ -101,6 +101,7 @@ def main(args):
 
     df = read_data_frame_cached(args.tsv, protein=args.protein, datefield=args.datefield)
     df = df[df.ParsedDate <= parse_date(args.last_date)]
+    orig_df = df
 
     train_lineages, val_lineages, test_lineages = split_by_lineage(
         df,
@@ -131,6 +132,18 @@ def main(args):
     move_to_train_list = train_sequences.intersection(test_sequences)
     test_sequences = test_sequences.difference(move_to_train_list)
 
+    if args.first_date:
+        logger.info(f"Found first date {args.first_date}. Only keeping sequences in circulation after this date.")
+        first_date = parse_date(args.first_date)
+        seq_after_first_date = set(orig_df[orig_df.ParsedDate >= first_date].SpikeMutations.tolist())
+
+        def filter_helper(item_list: list) -> list:
+            return [x for x in item_list if x in seq_after_first_date]
+
+        train_sequences, val_sequences, test_sequences = [filter_helper(x) for x in [
+            train_sequences, val_sequences, test_sequences,
+        ]]
+
     if args.enumerate:
         train_sequences = get_enumerated_list(train_sequences, spike_to_count_dict)
         val_sequences = get_enumerated_list(val_sequences, spike_to_count_dict)
@@ -160,6 +173,7 @@ if __name__ == "__main__":
     parser.add_argument("--prefix", help="Output prefix", required=True)
     parser.add_argument("--tsv", help="TSV variants file", required=True)
     parser.add_argument("--last_date", help="Last date of sequence occurrence", required=True)
+    parser.add_argument("--first_date", help="First date of sequence occurrence", required=False)
     parser.add_argument("--ref", help="Reference sequence file", required=True)
     parser.add_argument("--n_train_per_bucket", help="Number of train per bucket", default=4, type=int)
     parser.add_argument("--n_val_per_bucket", help="Number of val per bucket", default=1, type=int)
