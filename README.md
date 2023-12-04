@@ -25,192 +25,55 @@ biopython
 
 # Running PandoGen training
 
-1. Generating fasta data from the variant\_surveillance.tsv file for finetuning SDA
+1. Downloadign a pretrained checkpoint
+
+A pre-trained checkpoint on UniRef50 sequences is available at https://huggingface.co/oddjobs/pandogen-uda
+
+PandoGen uses this checkpoint as a startpoint to perform finetuning.
+
+2. On SLURM systems PandoGen supports push-button exeuction of the entire training pipeline. This can
+be run as follows.
+
+This command has been tested on both systems with V100 GPUs (16GB global memory) and A100 GPUs. Note that
+some steps need 4 GPUs available at the same time.
 
 ```
-OUTPUT_PREFIX=<prefix of output files>
-
-python random_split_fasta.py \
-        --prefix $OUTPUT_PREFIX \
-        --tsv /path/to/variant_surveillance.tsv \
-        --last_date $LAST_DATE \
-        --ref <SARS-CoV2 reference sequence> \
-        --n_train_per_bucket <Number of training buckets> \
-        --n_val_per_bucket <Number of validation buckets> \
-        --n_test_per_bucket <Number of test buckets> \
-        --protein Spike \
-        --datefield "Submission date"
+python pandogen_train_top.py \
+	--workdir <Working directory> \
+	--tsv <variant_surveillance.tsv file from GISAID> \
+	--last_date <Training cutoff date. Only data until this date is used> \
+        --ref <A text file containing GISAID Spike protein reference> \
+	--pretrained_ckpt <pandogen-uda model downloaded as above> \
+        --name_prefix <Name prefixes for all SLURM jobs> \
+        --first_date <If provided, only GISAID sequences reported after this date are used> \
+        --finetune_batch_size <Batch size for SDA finetuning. Optional.> \
+        --competition_batch_size <Batch size for reward model training. Optional.> \
+        --quark_gen_batch_size <Batch size for data generation during the PandoGen finetuning step> \
+        --quark_train_batch_size <Batch size for gradient descent> \
+        --quark_gradient_checkpoint <Use gradient checkpointing> \
+        --fasta <Spike fasta from GISAID for first time launch only> \
+	--no_launch # Provide this option if SLURM commands only need to prepared, but not launched
 ```
+Note that the parameters in `*.slurm` files in the `end_to_end_flow` directory will be automatically added
+to the headers. Similarly the contents of the file `env_load.sh` will be inserted after the header to initialize
+the environment. If these are different for your system, please keep the following files in your working directory with
+the appropriate values: `gpu1_config.slurm`, `gpu4_config.slurm`, `cpu_config.slurm` and `env_load.sh`, and the script
+will automatically pick those.
 
-Here,`--last\_date` represents the last date of the training period.
+The training results will be in the directory `models` inside the working directory. The quark checkpoint will be
+in `models/quark_JOBNAME_${Timestamp}` where JOBNAME is the option passed through `--name_prefix` and $Timestamp
+is the time at which the job was launched.
 
-2. Generating reward modeling data
+3. Package PandoGen checkpoints
 
-```
-# Note the previous train/val spiit is not used in the following.
-# We still pass a dummy value for -val\_sequences
-cat ${OUTPUT\_PREFIX}.train.mutations.lst ${OUTPUT\_PREFIX}.val.mutations.lst > $ALL\_MUTATIONS
-
-python create_occurrence_buckets.py \
-        --tsv $TSV \
-        --availability_last_date $LAST_DATE \
-        --datefield "Submission date" \
-        --protein Spike \
-        --period_length 7 \
-        --output_prefix $REWARD_MODEL_DATA_PREFIX \
-        --primary_locations "Asia,Europe" \
-        --control_locations "~Asia,Europe" \
-        --train_sequences $ALL_SEQUENCES \
-        --val_sequences ${OUTPUT\_PREFIX}.val.mutations.lst \
-        --max_p_diff <set a max diff value> \
-        --combine_type union \
-        --max_sequence_comparisons <Set a max limit> \
-        --max_to_verify <set a mx limit value> \
-        --max_train <Set a max limit value> \
-        --max_val <Set a max limit value>
-```
-
-3. Create SDA model by finetuning on SARS-CoV2 data
+PandoGen checkpoints should be post-processed to be used in other machines or other locations. To do this, the following
+script can be used:
 
 ```
-torchrun --nproc\_per\_node $N\_GPUS train\_decoder.py \
-                --train $train \
-                --val $val \
-                --output_dir $SDA_PATH \
-                --do_train \
-                --per_device_train_batch_size $BATCH_SIZE \
-                --gradient_accumulation_steps $N_ACC \
-                --learning_rate $LR \
-                --num_train_epochs $N_EPOCHS \
-                --lr_scheduler_type linear \
-                --warmup_steps $WARMUP_STEPS \
-                --weight_decay $WEIGHT_DECAY \
-                --log_level info \
-                --logging_strategy steps \
-                --logging_first_step  \
-                --logging_steps $LOGGING_STEPS \
-                --save_strategy steps \
-                --save_steps $SAVE_STEPS \
-                --evaluation_strategy steps \
-                --eval_steps $SAVE_STEPS \
-                --fp16 \
-                --dataloader_num_workers 0 \
-                --intermediate_size $FC_SIZE \
-                --hidden_size $ATTN_SIZE \
-                --num_hidden_layers 8 \
-                --num_attention_heads $N_HEADS \
-                --max_position_embeddings $N_MAX_LENGTH \
-                --checkpoint_params $ckpt \
-                --checkpoint_model_type "Decoder" \
-                --num_quark_quantiles 11 \
-                --load_best_model_at_end
+python package_quark_model.py <PandoGen checkpoint> <Packaged Checkpoint>
 ```
 
-4. Train reward model
-
-```
-torchrun --nproc_per_node $N_GPUS train_competition.py \
-        --pretrained_path $SDA_PATH \
-        --ref <Reference sequence> \
-        --model_type Decoder \
-        --precomputed_train_pairings <Data from (1)> \
-        --precomputed_val_pairings <Data from (1)> \
-        --attn_lr_deboost 1 \
-        --referee_type binary \
-        --prediction_type weight \
-        --output_dir $REWARD_OUTPUT_PATH \
-        --do_train \
-        --per_device_train_batch_size $BATCH_SIZE \
-        --gradient_accumulation_steps $N_ACC \
-        --learning_rate $LR \
-        --weight_decay $WEIGHT_DECAY \
-        --num_train_epochs 1 \
-        --lr_scheduler_type linear \
-        --warmup_steps $warmup_steps \
-        --logging_strategy steps \
-        --logging_steps $LOGGING_STEPS \
-        --save_strategy steps \
-        --save_steps $SAVE_STEPS \
-        --fp16 \
-        --dataloader_num_workers 0
-```
-
-5. Validate and select best reward model
-
-
-```
-# Create validation data
-python create_competition_validation_data.py \
-        --tsv $TSV \
-        --datefield "Submission date" \
-        --protein "Spike" \
-        --end_date $LAST_DATE \
-        --ref $ref \
-        --output_prefix $REWARD_VALIDATION_PREFIX
-
-for ckpt in $(ls $REWARD_OUTPUT_PATH/checkpoint-* -d); do
-        output_prefix=<Output of evaluation results>
-
-        python /home/aramach4/COVID19/covid19/run_validation_for_competition_models.py \
-                --checkpoint_path $ckpt \
-                --pretrained_path $SDA_PATH \
-                --target_sequences ${REWARD_VALIDATION_PREFIX}.json \
-                --output_prefix $output_prefix \
-                --model_type Decoder \
-                --predict_batch_size 7 \
-                --embedding_batch_size 7
-done
-```
-
-6. Initialize PandoGen finetuning by generating an initial sequence set
-
-```
-python predict_decoder.py \
-        --checkpoint $decoder_ckpt \
-        --output_prefix ${INIT_SEQUENCES%.*} \
-        --gen_do_sample \
-        --gen_max_new_tokens 1398 \
-        --gen_num_return_sequences <Batch size> \
-        --num_batches <Number of batches>
-```
-
-7. Perform PandoGen finetuning
-
-```
-python train_quark_finetune.py \
-        --generative_model $SDA_PATH \
-        --potential_model <Best checkpoint from step 5> \
-        --potential_pretrained_path $SDA_PATH \
-        --gen_num_return_sequences $GEN_BATCH_SIZE \
-        --n_init_batches 0 \
-        --init_sequences $INIT_SEQUENCES \
-        --n_eval_batches $N_EVAL_BATCHES \
-        --pool_size <Size of quark data pool> \
-        --prior_sequences <Training sequences> \
-        --quantile_spec <Quantile specification> \
-        --output_dir <Results directory> \
-        --gen_do_sample \
-        --gen_max_new_tokens 1398 \
-        --do_train \
-        --evaluation_strategy epoch \
-        --per_device_train_batch_size $TRAIN_BATCH_SIZE \
-        --gradient_accumulation_steps $n_acc \
-        --learning_rate <Learning rate> \
-        --quark_beta <Quark beta parameter> \
-        --weight_decay <Weight decay> \
-        --num_train_epochs <Number of epochs> \
-        --lr_scheduler_type linear \
-        --warmup_steps $WARMUP_STEPS \
-        --logging_strategy steps \
-        --logging_steps $LOGGING_STEPS \
-        --save_strategy epoch \
-        --fp16 \
-        --dataloader_num_workers <Number of data workers> \
-        --no_dropout \
-        --early_stopping <Number of early stopping steps>
-```
-
-# 3 Running PandoGen sequence generation
+# Running PandoGen sequence generation
 
 ```
  python predict_decoder.py \
@@ -224,3 +87,5 @@ python train_quark_finetune.py \
                         --num_batches <Number of batches to generate> \
                         --seed <Random seed>
 ```
+
+If using the packaged checkpoint, please use the option  `--load_from_pretrained`.
