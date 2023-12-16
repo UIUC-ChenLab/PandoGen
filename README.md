@@ -104,7 +104,7 @@ the script as follows.
 			--load_from_pretrained  # This option is used if the PandoGen model is packaged as per step (2.3) above.
 ```
 
-The output SON file contains both generated sequences and their log-likelihoods, which may be used for ranking the sequences.
+The output `JSON` file contains both generated sequences and their log-likelihoods, which may be used for ranking the sequences.
 In case PandoGen is being trained on sequences known at some past point in the pandemic so as to validate it, the generated
 output sequences may be compared with the sequences first reported after the training cutoff date in step 2.2. If PandoGen
 is being trained using all GISAID sequences so as to use it for forecasting future sequences, simply known sequences may be
