@@ -7,7 +7,7 @@ train models for the COVID-19 pandemic, forecasting Spike protein sequences.
 Our pre-print is available at [biorxiv](https://www.biorxiv.org/content/10.1101/2023.05.10.540124v1)
 Anand Ramachandran, Steven S. Lumetta, Deming Chen, "PandoGen: Generating complete instances of future SARS-CoV2 sequences using Deep Learning", bioRxiv 2023
 
-# System Requirements
+# 1. System Requirements
 
 PandoGen has been tested on both PPC and Intel systems with V100 and A100 GPUs. PandoGen has the following dependencies
 
@@ -23,15 +23,15 @@ bioconda
 biopython
 ```
 
-# Running PandoGen training
+# 2. Running PandoGen training
 
-1. Downloading a pretrained checkpoint
+2.1. Downloading a pretrained checkpoint
 
 A pre-trained checkpoint on UniRef50 sequences is available at [huggingface](https://huggingface.co/oddjobs/pandogen-uda)
 
 PandoGen uses this checkpoint as a startpoint to perform finetuning.
 
-2. On SLURM systems PandoGen supports push-button exeuction of the entire training pipeline. This can
+2.2. On SLURM systems PandoGen supports push-button exeuction of the entire training pipeline. This can
 be run as follows.
 
 This command has been tested on both systems with V100 GPUs (16GB global memory) and A100 GPUs. Note that
@@ -75,7 +75,7 @@ The training results will be in the directory `models` inside the working direct
 in `models/quark_JOBNAME_Timestamp` where JOBNAME is the option passed through `--name_prefix` and `Timestamp`
 is the time at which the job was launched.
 
-3. Package PandoGen checkpoints (Optional)
+2.3. Package PandoGen checkpoints (Optional)
 
 PandoGen checkpoints should be post-processed to be used in other machines or other locations. To do this, the following
 script can be used:
@@ -84,7 +84,7 @@ script can be used:
 python package_quark_model.py <PandoGen checkpoint> <Packaged Checkpoint>
 ```
 
-# Running PandoGen sequence generation
+# 3. Running PandoGen sequence generation
 
 To sample sequences from the trained PandoGen model a single script `predict_decoder.py` can be used. The script simply
 takes the trained checkpoint, and produces the output sequences. The various sampling parameters are passed to
@@ -101,5 +101,12 @@ the script as follows.
                         --gen_top_p <Top-p value> \
                         --num_batches <Number of batches to generate> \
                         --seed <Random seed> \
-			--load_from_pretrained  # This option is used if the PandoGen model is packaged as per step (3) above.
+			--load_from_pretrained  # This option is used if the PandoGen model is packaged as per step (2.3) above.
 ```
+
+The output SON file contains both generated sequences and their log-likelihoods, which may be used for ranking the sequences.
+In case PandoGen is being trained on sequences known at some past point in the pandemic so as to validate it, the generated
+output sequences may be compared with the sequences first reported after the training cutoff date in step 2.2. If PandoGen
+is being trained using all GISAID sequences so as to use it for forecasting future sequences, simply known sequences may be
+removed from the generated output file to get a list of new forecasts. Please follow our manuscript for details on how we
+perfromed evaluations.
