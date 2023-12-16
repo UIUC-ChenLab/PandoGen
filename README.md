@@ -1,4 +1,4 @@
-# PandoGen: Generating complete instances of future SARS CoV2 Spike protein using LLMs
+# PandoGen: Generating complete instances of future SARS-CoV-2 Spike protein using LLMs
 
 PandoGen is a Protein Language Model aligned towards predicting
 future viral sequences in the midst of a pandemic. The code in this repository can be used to
